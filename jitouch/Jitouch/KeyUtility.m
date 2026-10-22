@@ -7,6 +7,7 @@
 
 #import "KeyUtility.h"
 #import <Carbon/Carbon.h>
+#import <IOKit/hidsystem/IOLLEvent.h>
 
 // to suppress "'CGPostKeyboardEvent' is deprecated" warnings
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -52,7 +53,39 @@ static void languageChanged(CFNotificationCenterRef center, void *observer, CFSt
     return self;
 }
 
+// A lone modifier press (e.g. Right Option as a dictation hotkey) must arrive as a
+// flagsChanged pair carrying the side-specific device mask, or apps can't tell it apart.
+static BOOL simulateModifierKey(CGKeyCode code) {
+    CGEventFlags flags;
+    switch (code) {
+        case kVK_Shift:        flags = kCGEventFlagMaskShift | NX_DEVICELSHIFTKEYMASK; break;
+        case kVK_RightShift:   flags = kCGEventFlagMaskShift | NX_DEVICERSHIFTKEYMASK; break;
+        case kVK_Control:      flags = kCGEventFlagMaskControl | NX_DEVICELCTLKEYMASK; break;
+        case kVK_RightControl: flags = kCGEventFlagMaskControl | NX_DEVICERCTLKEYMASK; break;
+        case kVK_Option:       flags = kCGEventFlagMaskAlternate | NX_DEVICELALTKEYMASK; break;
+        case kVK_RightOption:  flags = kCGEventFlagMaskAlternate | NX_DEVICERALTKEYMASK; break;
+        case kVK_Command:      flags = kCGEventFlagMaskCommand | NX_DEVICELCMDKEYMASK; break;
+        case kVK_RightCommand: flags = kCGEventFlagMaskCommand | NX_DEVICERCMDKEYMASK; break;
+        default: return NO;
+    }
+    CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
+    for (int down = 1; down >= 0; down--) {
+        CGEventRef event = CGEventCreateKeyboardEvent(source, code, down);
+        CGEventSetType(event, kCGEventFlagsChanged);
+        CGEventSetFlags(event, (down ? flags : 0) | kCGEventFlagMaskNonCoalesced);
+        CGEventPost(kCGHIDEventTap, event);
+        CFRelease(event);
+        if (down)
+            usleep(30000);
+    }
+    CFRelease(source);
+    return YES;
+}
+
 - (void)simulateKeyCode:(CGKeyCode)code ShftDown:(BOOL)shft CtrlDown:(BOOL)ctrl AltDown:(BOOL)alt CmdDown:(BOOL)cmd {
+
+     if (!shft && !ctrl && !alt && !cmd && simulateModifierKey(code))
+     return;
 
      if (shft)
      CGPostKeyboardEvent((CGCharCode)0, (CGKeyCode)56, true);
