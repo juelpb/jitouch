@@ -440,6 +440,28 @@ static void setFGx(FingerGesture *out, float x1, float y1, float x2, float y2, f
     setFG2(&hg.fg[4], 0.05, 0.4, 0.05, 0.5, 1.4, 2.0, 1.4, 2.1);
     setFG2(&hg.fg[5], 0.15, 0.4, 0.15, 0.5, 1.4, 2.0, 1.4, 2.1);
 }
+- (void)createRightSideSlideUp {
+    hg.n = 2;
+    hg.t = 1.0*2;
+    setFG2(&hg.fg[0], 0.95, 0.35, 0.95, 0.65, 0.2, 0.8, 0.1, 0.9);
+    setFG2(&hg.fg[1], 0.85, 0.35, 0.85, 0.65, 0.2, 0.8, 0.1, 0.9);
+}
+- (void)createRightSideSlideDown {
+    hg.n = 2;
+    hg.t = 1.0*2;
+    setFG2(&hg.fg[0], 0.95, 0.65, 0.95, 0.35, 0.2, 0.8, 0.1, 0.9);
+    setFG2(&hg.fg[1], 0.85, 0.65, 0.85, 0.35, 0.2, 0.8, 0.1, 0.9);
+}
+
+- (void)createCornerTapAtX:(float)x y:(float)y {
+    hg.n = 1;
+    hg.t = 0.6*2;
+    setFG(&hg.fg[0], x, y, x, y, 0.3, 0.3+0.15);
+}
+- (void)createTopLeftCornerTap { [self createCornerTapAtX:0.06 y:0.9]; }
+- (void)createTopRightCornerTap { [self createCornerTapAtX:0.94 y:0.9]; }
+- (void)createBottomLeftCornerTap { [self createCornerTapAtX:0.06 y:0.1]; }
+- (void)createBottomRightCornerTap { [self createCornerTapAtX:0.94 y:0.1]; }
 
 - (void)createThreeSwipeUp {
     hg.n = 3;

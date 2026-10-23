@@ -130,6 +130,12 @@ static int trackpadNFingers, trackpadClicked;
 static int autoScrollFlag;
 static int moveResizeFlag, shouldExitMoveResize;
 
+// swallow the clicks and scrolling caused by corner taps and right-side slides
+static int cornerTouch;
+static CFAbsoluteTime lastCornerTapTime;
+static int rightSideSlideFlag;
+static CFAbsoluteTime lastRightSideSlideTime;
+
 // distance between two fingers to suppress left click in next/prev tab gesture
 static float twoFingersDistance = 100.0f;
 static BOOL trackpadHasTwoFingers;
@@ -2002,6 +2008,77 @@ static void gestureTrackpadAutoScroll(const Finger *data, int nFingers, double t
 }
 
 
+static NSString * const cornerTapGestures[4] = {
+    @"Top-Left Corner Tap", @"Top-Right Corner Tap", @"Bottom-Left Corner Tap", @"Bottom-Right Corner Tap"
+};
+
+// Index into cornerTapGestures, or -1 away from the corners.
+static int trackpadCornerAt(float x, float y) {
+    const float zone = 0.15;
+    if ((x > zone && x < 1 - zone) || (y > zone && y < 1 - zone))
+        return -1;
+    return (y < 0.5) * 2 + (x > 0.5);
+}
+
+// One finger tapping a corner. While it rests there unmoved, cornerTouch makes
+// the event tap swallow the click the tap or a press causes, so an assigned
+// corner acts as a button of its own.
+static void gestureTrackpadCornerTap(const Finger *data, int nFingers, double timestamp) {
+    static double sttime;
+    static float stx, sty;
+    static int corner = -1, lastNFingers;
+
+    if (nFingers == 1 && lastNFingers == 0) {
+        corner = trackpadCornerAt(data[0].px, data[0].py);
+        if (corner != -1 && !commandForGesture(cornerTapGestures[corner], TRACKPAD))
+            corner = -1;
+        sttime = timestamp;
+        stx = data[0].px;
+        sty = data[0].py;
+        cornerTouch = corner != -1;
+    } else if (corner != -1 &&
+               !(nFingers == 1 && timestamp - sttime <= clickSpeed && lenSqr(stx, sty, data[0].px, data[0].py) <= 0.001)) {
+        if (nFingers == 0 && timestamp - sttime <= clickSpeed) {
+            lastCornerTapTime = CFAbsoluteTimeGetCurrent();
+            dispatchCommand(cornerTapGestures[corner], TRACKPAD);
+        }
+        corner = -1;
+        cornerTouch = 0;
+    }
+    lastNFingers = nFingers;
+}
+
+static NSString * const rightSideSlideGestures[2] = {@"Right-Side Slide-Up", @"Right-Side Slide-Down"};
+
+// Two fingers landing at the right edge and sliding up or down fire the
+// gesture once per step of height, like turning a knob.
+static void gestureTrackpadRightSideSlide(const Finger *data, int nFingers) {
+    const float stepHeight = 0.05;
+    static float lastY;
+    static int lastNFingers;
+
+    if (nFingers == 2 && lastNFingers < 2) {
+        if (fminf(data[0].px, data[1].px) > 0.7 && fmaxf(data[0].px, data[1].px) > 0.9 &&
+            (commandForGesture(rightSideSlideGestures[0], TRACKPAD) || commandForGesture(rightSideSlideGestures[1], TRACKPAD))) {
+            rightSideSlideFlag = 1;
+            lastY = (data[0].py + data[1].py) / 2;
+        }
+    } else if (rightSideSlideFlag) {
+        if (nFingers == 2) {
+            float y = (data[0].py + data[1].py) / 2;
+            for (; y - lastY >= stepHeight; lastY += stepHeight)
+                dispatchCommand(rightSideSlideGestures[0], TRACKPAD);
+            for (; lastY - y >= stepHeight; lastY -= stepHeight)
+                dispatchCommand(rightSideSlideGestures[1], TRACKPAD);
+        } else {
+            rightSideSlideFlag = 0;
+            lastRightSideSlideTime = CFAbsoluteTimeGetCurrent();
+        }
+    }
+    lastNFingers = nFingers;
+}
+
+
 static int trackpadCallback(MTDeviceRef device, Finger *data, int nFingers, double timestamp, int frame) {
     if (DEBUG && logLevel >= LOG_LEVEL_TRACE) NSLog(@"TrackpadCallback %p", device);
     trackpadNFingers = nFingers;
@@ -2127,6 +2204,8 @@ static int trackpadCallback(MTDeviceRef device, Finger *data, int nFingers, doub
         if (!gestureTrackpadMoveResize(data, nFingers, timestamp)) {
             if (!isTrackpadRecognizing) {
                 gestureTrackpadAutoScroll(data, nFingers, timestamp);
+                gestureTrackpadRightSideSlide(data, nFingers);
+                gestureTrackpadCornerTap(data, nFingers, timestamp);
 
                 gestureTrackpadOneFixOneTap(data, nFingers, timestamp);
 
@@ -2930,6 +3009,11 @@ static void multitouchDeviceRemoved(void* refCon, io_iterator_t iterator) {
 #pragma mark - CGEventCallback
 
 static CGEventRef CGEventCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *refcon) {
+    // tap-to-click may arrive just after the corner tap has fired
+    if (type == kCGEventLeftMouseDown && (cornerTouch || CFAbsoluteTimeGetCurrent() - lastCornerTapTime < 0.5)) {
+        simulating = IGNOREMOUSE;
+        return NULL;
+    }
     if (type == kCGEventLeftMouseDown) {
         double timeInterval = fabs([lastTwoFingerDate timeIntervalSinceNow]);
         bool suppress = trackpadHasTwoFingers || timeInterval < 0.05;
@@ -3032,7 +3116,10 @@ static CGEventRef CGEventCallback(CGEventTapProxy proxy, CGEventType type, CGEve
         }
 
     } else if (type == kCGEventScrollWheel) {
-        if (magicMouseThreeFingerFlag || isTrackpadRecognizing)
+        if (magicMouseThreeFingerFlag || isTrackpadRecognizing || rightSideSlideFlag)
+            return NULL;
+        // the flick that ends a right-side slide would coast on as momentum scrolling
+        else if (CGEventGetIntegerValueField(event, kCGScrollWheelEventMomentumPhase) && CFAbsoluteTimeGetCurrent() - lastRightSideSlideTime < 2)
             return NULL;
         else if (autoScrollFlag) {
             int64_t sc = CGEventGetIntegerValueField(event, kCGScrollWheelEventDeltaAxis1);

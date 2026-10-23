@@ -80,6 +80,12 @@
                    @"Index-To-Pinky",
                       @"Left-Side Scroll",
                       @"Right-Side Scroll",
+                   @"Right-Side Slide-Up",
+                   @"Right-Side Slide-Down",
+                   @"Top-Left Corner Tap",
+                   @"Top-Right Corner Tap",
+                   @"Bottom-Left Corner Tap",
+                   @"Bottom-Right Corner Tap",
                    @"All Unassigned Gestures",
                    nil];
 
